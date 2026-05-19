@@ -1,0 +1,1656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="color-scheme" content="only light">
+    <title>Liquid Glass</title>
+    <!-- <link rel="stylesheet" href="style.css"> -->
+</head>
+<body>
+<style>
+@font-face {
+  font-family: 'MiSans';
+  src: url("./font/MiSans-Medium_subset.ttf") format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'MiSans';
+  src: url("./font/MiSans-Semibold_subset.ttf") format('truetype');
+  font-weight: 500;
+  font-style: normal;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: "MiSans", "Mi Sans", mi-sans, system-ui, sans-serif;
+  font-weight: 400;
+  background-color: #000; /* 浏览器界面比例不符时的纯黑背景 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  user-select: none; /* 全局禁止选中 */
+  -webkit-user-select: none; /* 兼容Webkit内核（如Edge, Chrome） */
+  -webkit-user-drag: none; /* 禁止原生图片/元素的拖拽行为 */
+  -webkit-tap-highlight-color: transparent; /* 禁止移动端点击/长按时出现浅蓝色高亮遮罩 */
+  -webkit-touch-callout: none; /* 禁止移动端长按弹出系统菜单（保存图片等） */
+}
+
+.bg-container {
+  position: relative;
+  /* 锁定 1440x3200 (9:20) 比例并始终在其范围内显示完全 */
+  width: min(100vw, 100vh * 1440 / 3200);
+  height: min(100vh, 100vw * 3200 / 1440);
+  /* background: url('./bg.jpg') no-repeat center/cover; */
+  background: black;
+  overflow: hidden;
+}
+
+.bg-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none; /* 禁用视频的鼠标交互，以免遮挡按钮 */
+}
+
+/* 新增长图背景及滚动样式 */
+.scroll-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  cursor: grab;
+  scrollbar-width: none; /* Firefox隐藏滚动条 */
+  z-index: 3;
+}
+.scroll-bg::-webkit-scrollbar {
+  display: none; /* Chrome/Safari隐藏滚动条 */
+}
+.scroll-bg img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none; /* 避免拖拽时原生图片拖拽行为 */
+}
+
+/* 背景模式切换过渡 */
+.bg-video {
+  transition: opacity 0.4s ease;
+}
+.scroll-bg {
+  transition: opacity 0.4s ease;
+}
+
+/* 非截图图片的裁切显示模式（宽高比 > 1440/3200） */
+.scroll-bg.cover-mode {
+  overflow-y: hidden !important;
+  cursor: default !important;
+}
+.scroll-bg.cover-mode img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
+/* 新增：全局压暗与模糊层，在背景之上、按钮之下 */
+.global-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* 事件透传给背景用于拖拽 */
+  /* backdrop-filter: blur(0px) brightness(0.6);
+  -webkit-backdrop-filter: blur(0px) brightness(0.6); */
+  backdrop-filter: blur(calc(min(100vw, 100vh * 1440 / 3200) * var(--bg-blur, 5) / 1440)) brightness(var(--bg-brightness, 0.6));
+  -webkit-backdrop-filter: blur(calc(min(100vw, 100vh * 1440 / 3200) * var(--bg-blur, 5) / 1440)) brightness(var(--bg-brightness, 0.6));
+  z-index: 5;
+}
+
+.glass {
+  position: absolute;
+  transform: translate(-50%, -50%); /* 允许使用基于中心的绝对定位 */
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid transparent; /* 边框作为裁切区 */
+  /* 核心魔法：使用 mask 将 padding-box 裁剪，完美扣掉包含毛刺边缘的那 1px 透明边框，且适配任何计算得出的不规则圆角 */
+  -webkit-mask-image: linear-gradient(white, white);
+  -webkit-mask-clip: padding-box;
+  mask-image: linear-gradient(white, white);
+  mask-clip: padding-box;
+  overflow: hidden; /* 强制裁剪子代以适配圆角，确保滑动条不溢出 */
+  /* box-shadow: 0 0 0 2px rgba(255, 255, 255, .6), 0 16px 32px rgba(0, 0, 0, .12); */
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  outline: 0;
+  aspect-ratio: 1 / 1; /* 根据宽度自动保持正圆形 */
+  /* 使用带有过载控制点（>1）的贝塞尔曲线，实现越界回弹物理反馈（按下冲过头再收缩、松开缩过头再弹回） */
+  transition: transform 0.5s cubic-bezier(0.25, 1.5, 0.4, 1), background-color 0.3s ease;
+  z-index: 10; /* 确保玻璃在遮罩上方 */
+  touch-action: none;
+}
+
+/* 开启状态增加90%不透明度的白色 (btn16、17利用独立的滑动填充层，故排除) */
+.glass.active-state:not(.btn16) {
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+/* restrict 中间态：降低玻璃不透明度 */
+.glass.restrict-state {
+  background-color: rgba(255, 255, 255, 0.75);
+}
+
+.glass .icon-layer.icon-restrict {
+  opacity: 0;
+}
+.glass.restrict-state .icon-layer.icon-restrict {
+  opacity: 1;
+}
+.glass.restrict-state .icon-layer.icon-off {
+  opacity: 0;
+}
+/* 三态切换：仅在无 .active-state 且无 .restrict-state 时显示 icon-off */
+/* .glass:not(.active-state):not(.restrict-state) .icon-layer.icon-off {
+  opacity: 1;
+}
+.glass.restrict-state .icon-layer.icon-off {
+  opacity: 0;
+}
+.glass.active-state .icon-layer.icon-off {
+  opacity: 0;
+} */
+
+.glass.sliding {
+  transform: translate(-50%, -50%) scale(1.05) !important;
+}
+
+.slider-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background-color: rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  z-index: -1; /* 保证在图标下层 */
+}
+
+/* 针对按钮13的特殊样式 */
+#btn13, #btn14 {
+  border-radius: 9999px; /* 使用大圆角完美实现胶囊形状，替代不支持响应式缩放的 clip-path */
+  aspect-ratio: auto;
+}
+
+#btn15 {
+  /* 使圆角弧度大小跟随 .bg-container 完美等比缩放，且永远不会被拉长成椭圆角。
+     基于容器锁定的计算宽度 min(100vw, 100vh * 1440 / 3200) 乘以像素占比 (30 / 1440) 即可 */
+  border-radius: calc(min(100vw, 100vh * 1440 / 3200) * 125 / 1440);
+  aspect-ratio: auto;
+}
+
+#btn16, #btn17 {
+  border-radius: 9999px;
+  aspect-ratio: auto;
+}
+
+#btn18 {
+  border-radius: 9999px;
+  aspect-ratio: auto;
+}
+
+#btn19 {
+  border-radius: 9999px;
+  aspect-ratio: auto;
+}
+
+#btn21, #btn22, #btn23, #btn24, #btn25, #btn26 {
+  border-radius: 9999px;
+  aspect-ratio: auto;
+  color: #fff;
+  font-size: calc(min(100vw, 100vh * 1440 / 3200) * 44 / 1440);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+}
+
+/* .btn19-text {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: calc(min(100vw, 100vh * 1440 / 3200) * 45 / 1440);
+  font-weight: 400;
+  color: #FFF;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  line-height: 1;
+} */
+
+.btn0.pressing {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.btn13.pressing {
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.btn15.pressing {
+  transform: translate(-50%, -50%) scale(1.03);
+}
+
+.btn18.pressing {
+  transform: translate(-50%, -50%) scale(1.03);
+}
+
+.btn19.pressing {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.btn16.pressing {
+  transform: translate(-50%, -50%) scale(1.05);
+}
+
+.glass .icon-layer {
+  position: absolute;
+  width: 65%;
+  height: 65%;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-mode: luminance; /* Alpha */
+  mask-mode: luminance;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  user-select: none;
+}
+.glass .direct-icon {
+  position: absolute;
+  object-fit: contain;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+.glass .icon-layer.icon-on,
+.glass .direct-icon.icon-on {
+  opacity: 0;
+}
+.glass.active-state .icon-layer.icon-on,
+.glass.active-state .direct-icon.icon-on {
+  opacity: 1;
+}
+.glass.active-state .icon-layer.icon-off,
+.glass.active-state .direct-icon.icon-off {
+  opacity: 0;
+}
+
+.slider-icon-wrapper {
+  position: absolute;
+  bottom: 9%; /* 偏下 */
+  width: 57%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.brightness-svg {
+  width: 100%;
+  height: 100%;
+  transform: scale(calc(1 + 0.2 * var(--progress, 0)));
+}
+
+.brightness-svg .sun-group {
+  transform: rotate(calc(180deg * var(--progress, 0)));
+  transform-origin: 51px 51px;
+}
+
+.brightness-svg .sun-core {
+  fill: #FFF;
+  transition: fill 0.3s ease;
+}
+
+.brightness-svg .sun-ray {
+  stroke: #FFF;
+  stroke-width: calc(7 / (1 + 0.2 * var(--progress, 0)));
+  stroke-linecap: round;
+  transition: stroke 0.3s ease;
+}
+
+.btn16.active-state .sun-core { fill: #ff9e05; }
+.btn16.active-state .sun-ray { stroke: #ff9e05; }
+
+#btn-overlay-wrapper {
+  position: absolute; /* 这里使用absolute以跟随.bg-container，而不是fixed */
+  transform: translate(-50%, -50%) scale(0.5); /* 一同缩小 */
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* .overlay-img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.4s ease, transform 0.1s ease;
+  transform: scale(1);
+  user-select: none;
+}
+
+#btn13:active + #btn-overlay-wrapper .overlay-img {
+  transform: scale(0.97);
+} */
+
+/* .toggle-btn {
+  position: absolute;
+  bottom: 2%;
+  right: 4%;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  z-index: 50;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  outline: none;
+} */
+
+/* 状态栏 */
+.status-bar {
+  position: absolute;
+  top: calc(min(100vw, 100vh * 1440 / 3200) * 250 / 1440);
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(min(100vw, 100vh * 1440 / 3200) * 1165 / 1440);
+  display: flex;
+  flex-direction: column;
+  gap: calc(min(100vw, 100vh * 1440 / 3200) * 2 / 1440);
+  z-index: 15;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.status-bar-upper {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  height: calc(min(100vw, 100vh * 1440 / 3200) * 80 / 1440);
+}
+
+.status-bar-upper .signal-text {
+  font-size: calc(min(100vw, 100vh * 1440 / 3200) * 40 / 1440);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  /* opacity: 0.7; */
+}
+
+.status-bar-lower {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: calc(min(100vw, 100vh * 1440 / 3200) * 80 / 1440);
+}
+
+.status-bar-lower .status-date {
+  font-size: calc(min(100vw, 100vh * 1440 / 3200) * 48 / 1440);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.status-bar-lower .status-icons {
+  display: flex;
+  align-items: center;
+  gap: calc(min(100vw, 100vh * 1440 / 3200) * 0 / 1440);
+}
+
+.status-bar-lower .status-icons img {
+  height: calc(min(100vw, 100vh * 1440 / 3200) * 70 / 1440);
+  width: auto;
+  display: block;
+}
+
+.status-bar-lower .status-icons img.icon-hidden {
+  display: none;
+}
+
+/* .status-bar-lower .status-icons img.icon-tinted {
+  filter: brightness(0) saturate(100%) invert(60%) sepia(90%) saturate(3000%) hue-rotate(10deg) brightness(100%) contrast(100%);
+} */
+
+
+/* 控制面板 */
+        :root {
+          --glass-size-width: calc(min(100vw, 100vh * 1440 / 3200) * 160 / 1440);
+          --glass-size-height: calc(min(100vw, 100vh * 1440 / 3200) * 80 / 1440);
+        }
+
+        .control-panel {
+          position: absolute;
+          top: calc(min(100vw, 100vh * 1440 / 3200) * 1750 / 1440);
+          left: 50%;
+          transform: translateX(-50%);
+          width: calc(min(100vw, 100vh * 1440 / 3200) * 1165 / 1440);
+          display: flex;
+          flex-direction: column;
+          gap: calc(min(100vw, 100vh * 1440 / 3200) * 50 / 1440);
+          z-index: 10;
+        }
+
+        .control-panel, .btn0, .btn19 {
+          transition:
+            transform 0.5s cubic-bezier(0.25, 1.5, 0.4, 1), background-color 0.3s ease,
+            opacity 0.4s ease 0.2s, visibility 0.4s ease 0.2s;
+          opacity: 1;
+          visibility: visible;
+        }
+
+        /* #btn24, #btn25 {
+          transition:
+            transform 0.5s cubic-bezier(0.25, 1.5, 0.4, 1), background-color 0.3s ease,
+            opacity 0.4s ease, visibility 0.4s ease;
+        } */
+
+        .control-item {
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: calc(min(100vw, 100vh * 1440 / 3200) * 30 / 1440);
+          width: 100%;
+        }
+
+        .title-display,
+        .value-display {
+          color: #fff;
+          font-weight: 500;
+          font-size: calc(min(100vw, 100vh * 1440 / 3200) * 64 / 1440);
+          white-space: nowrap;  /* 强制单行显示 */
+          flex-shrink: 0;       /* 关键：防止在空间不足时被挤压 */
+          width: auto;          /* 撤销之前的固定宽度，改为自动宽度 */
+          min-width: fit-content; /* 确保显示最小内容宽度 */
+        }
+
+        .value-display {
+          width: calc(min(100vw, 100vh * 1440 / 3200) * 120 / 1440);
+          min-width: calc(min(100vw, 100vh * 1440 / 3200) * 120 / 1440);
+        }
+
+        /* 滑块容器 */
+        .slider-wrapper {
+          flex: 1;
+          position: relative;
+          width: 100%;
+          height: calc(min(100vw, 100vh * 1440 / 3200) * 80 / 1440);
+          display: flex;
+          align-items: center;
+        }
+
+        /* --- 原生滑块逻辑层 --- */
+        .custom-slider {
+          appearance: none;
+          width: 100%;
+          height: calc(min(100vw, 100vh * 1440 / 3200) * 28 / 1440);
+          border-radius: 9999px;
+          background: rgba(255, 255, 255, 0.75);
+          outline: none;
+          cursor: pointer;
+          background-image: linear-gradient(#3482ff, #3482ff);
+          background-size: 50% 100%;
+          background-repeat: no-repeat;
+          position: relative;
+          z-index: 9;
+        }
+
+        /* 隐藏原生滑块手柄的颜色与描边，但保留大小用于交互 */
+        .custom-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: var(--glass-size-width);
+          height: var(--glass-size-height);
+          background: transparent; /* 完全透明 */
+          border: none;
+          cursor: pointer;
+        }
+
+        /* --- 玻璃光线扭曲层 --- */
+        .glass-thumb {
+          position: absolute;
+          width: var(--glass-size-width);
+          height: var(--glass-size-height);
+          border-radius: 9999px;
+          aspect-ratio: auto;
+          background: rgba(255, 255, 255, .9);
+          border: 1px solid transparent;
+          -webkit-mask-image: linear-gradient(white, white);
+          -webkit-mask-clip: padding-box;
+          mask-image: linear-gradient(white, white);
+          mask-clip: padding-box;
+          /* box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 8px 16px rgba(0, 0, 0, 0.2); */
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                    
+          pointer-events: none; /* 穿透点击，让下方的 slider 接收事件 */
+          z-index: 10;
+          left: 0;
+          /* 居中于轨道 */
+          top: 50%;
+          transform: translate(-50%, -50%);
+          transition: transform 0.1s ease-out, background 0.1s ease-out;
+        }
+
+        /* 鼠标悬停在 slider 上时，玻璃缩放动画 */
+        /* 修改此段：兼容原有的 :active 并新增 .dragging 类支持 */
+        /* .slider-wrapper:active .glass, */
+        .slider-wrapper.dragging .glass-thumb {
+          transform: translate(-50%, -50%) scale(1.2);
+          background: rgba(0, 0, 0, 0.2);
+        }
+
+        /* 核心修复二：阻止移动端拖动滑块时带动整个页面滚动 */
+        .custom-slider {
+            touch-action: none; 
+        }
+
+        .fade-hidden {
+          opacity: 0 !important;
+          visibility: hidden !important;
+          transition-delay: 0s !important;
+        }
+
+</style>
+
+<div class="bg-container">
+  <!-- 视频背景（暂时注释） -->
+  <video id="bgVideo" class="bg-video" src="./bg.mp4" autoplay loop muted playsinline></video>
+  
+  <!-- 顶部状态栏纯黑遮罩 -->
+  <!-- <div style="position: absolute; top: 0; left: 0; width: 100%; height: 3.2%; background-color: #000; pointer-events: none; z-index: 2;"></div> -->
+
+  <!-- 手动拖拽的长图背景 -->
+  <div id="scrollBg" class="scroll-bg">
+    <img src="./bg.webp" alt="long background" draggable="false">
+  </div>
+
+  <!-- 全局压暗模糊遮罩 -->
+  <div class="global-overlay"></div>
+
+  <!-- 状态栏 -->
+  <div class="status-bar">
+    <div class="status-bar-upper">
+      <!-- <span class="signal-text">仅可紧急通话</span> -->
+      <span id="text_signal" class="signal-text">中国电信HD | 中国移动HD</span>
+    </div>
+    <div class="status-bar-lower">
+      <span class="status-date" id="statusDate"></span>
+      <div class="status-icons">
+        <img src="./images/stat_sys_alarm.png" alt="alarm">
+        <img src="./images/stat_sys_nfc.png" alt="nfc">
+        <img id="icon_ap" src="./images/stat_sys_ap.png" alt="ap">
+        <img src="./images/stat_sys_quietmode.png" alt="quietmode">
+        <img id="icon_ringer" src="./images/stat_sys_ringer.png" alt="ringer">
+        <img id="icon_flightmode" src="./images/stat_sys_flightmode.png" alt="flightmode">
+        <img id="icon_signal_4G" src="./images/stat_sys_signal_4G.png" alt="signal_4G">
+        <img id="icon_signal_5G" src="./images/stat_sys_signal_5G.png" alt="signal_5G">
+        <img id="icon_wifi" src="./images/stat_sys_wifi.png" alt="wifi">
+        <img id="icon_battery" src="./images/stat_sys_battery.png" alt="battery">
+      </div>
+    </div>
+  </div>
+
+  <!-- 控制面板 -->
+  <div class="control-panel fade-hidden">
+    <!-- 滑动条由JS动态生成 -->
+  </div>
+
+<!-- 量产复用按钮，仅需加上 btn0 类即可 -->
+  <!-- <button id="btn1" class="glass btn0" style="
+    left: 17.5%; top: 58.15%; width: 17.3%;
+    backdrop-filter: url(#frosted-1);
+    -webkit-backdrop-filter: url(#frosted-1);
+  "></button> -->
+
+  <button id="btn1" class="glass btn0" style="
+    left: 17.5%; top: 58.15%; width: 17.3%;
+  "></button>
+
+  <button id="btn2" class="glass btn0" style="
+    left: 39.1667%; top: 58.15%; width: 17.3%;
+  "></button>
+
+  <button id="btn3" class="glass btn0" style="
+    left: 60.8333%; top: 58.15%; width: 17.3%;
+  "></button>
+
+  <button id="btn4" class="glass btn0" style="
+    left: 82.5%; top: 58.15%; width: 17.3%;
+  "></button>
+
+  <button id="btn5" class="glass btn0" style="
+    left: 17.5%; top: 67.9%; width: 17.3%;
+  "></button>
+
+  <button id="btn6" class="glass btn0" style="
+    left: 39.1667%; top: 67.9%; width: 17.3%;
+  "></button>
+
+  <button id="btn7" class="glass btn0" style="
+    left: 60.8333%; top: 67.9%; width: 17.3%;
+  "></button>
+
+  <button id="btn8" class="glass btn0" style="
+    left: 82.5%; top: 67.9%; width: 17.3%;
+  "></button>
+
+  <button id="btn9" class="glass btn0" style="
+    left: 17.5%; top: 77.65%; width: 17.3%;
+  "></button>
+
+  <button id="btn10" class="glass btn0" style="
+    left: 39.1667%; top: 77.65%; width: 17.3%;
+  "></button>
+
+  <button id="btn11" class="glass btn0" style="
+    left: 60.8333%; top: 77.65%; width: 17.3%;
+  "></button>
+
+  <button id="btn12" class="glass btn0" style="
+    left: 82.5%; top: 77.65%; width: 17.3%;
+  "></button>
+
+  <button id="btn13" class="glass btn13" style="
+    left: 28.3%; top: 18.6%; width: 40%; height: 8.2%;
+  "></button>
+  <button id="btn14" class="glass btn13" style="
+    left: 71.7%; top: 18.6%; width: 40%; height: 8.2%;
+  "></button>
+
+  <button id="btn15" class="glass btn15" style="
+    left: 28.3%; top: 33.3%; width: 40%; height: 18%;
+  "></button>
+
+  <button id="btn16" class="glass btn16" style="
+    left: 60.8333%; top: 33.3%; width: 18%; height: 17.7%;
+  "></button>
+  <button id="btn17" class="glass btn16" style="
+    left: 82.5%; top: 33.3%; width: 18%; height: 17.7%;
+  "></button>
+
+  <button id="btn18" class="glass btn18" style="
+    left: 50%; top: 48.25%; width: 83.5%; height: 8.7%;
+  "></button>
+
+  <button id="btn19" class="glass btn19" style="
+    left: 50%; top: 86.2%; width: 14.5%; height: 3.2%;
+  "></button>
+
+  <!-- 对齐上面的滑动条：left: 37.5%; -->
+  <button id="btn21" class="glass btn19 fade-hidden" style="
+    left: 30.5%; top: 77.5%; width: 14.5%; height: 3.2%;
+  ">图片</button>
+  <button id="btn22" class="glass btn19 fade-hidden" style="
+    left: 49%; top: 77.5%; width: 14.5%; height: 3.2%;
+  ">导入</button>
+  <button id="btn23" class="glass btn19 fade-hidden" style="
+    left: 85%; top: 77.5%; width: 14.5%; height: 3.2%;
+  ">参数</button>
+
+  <button id="btn24" class="glass btn19 fade-hidden" style="
+    left: 30.5%; top: 81.25%; width: 14.5%; height: 3.2%;
+  ">暂停</button>
+  <button id="btn25" class="glass btn19 fade-hidden" style="
+    left: 49%; top: 81.25%; width: 14.5%; height: 3.2%;
+  ">声音</button>
+  <button id="btn26" class="glass btn19 fade-hidden" style="
+    left: 85%; top: 81.25%; width: 14.5%; height: 3.2%;
+  ">背景</button>
+
+  <!-- <div id="btn-overlay-wrapper" style="left: 75%; top: 75%; width: 400px; height: 200px;"> -->
+    <!-- 如果你有单独的贴图，可以重新写 src。此处移除了由于错误绑定了置换贴图而导致的纯黄覆盖 -->
+    <!-- <img class="overlay-img" src="" style="display: none;" alt="">
+  </div> -->
+
+  <!-- 简洁的视频播放/暂停按钮（暂时注释） -->
+  <!-- <button id="toggleBtn" class="toggle-btn">⏸</button> -->
+</div>
+
+<svg style="position:absolute;width:0;height:0">
+  <defs>
+    <!-- 自动生成的量产滤镜将由后面的 JS 自动插入到这里 -->
+    <!-- <filter id="frosted-1" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+      <feImage href="./feImage0.png" x="0" y="0" width="1" height="1" result="map"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.02" result="blur"/>
+      <feColorMatrix type="matrix" in="blur" result="brightened" values="
+        1.5 0 0 0 0
+        0 1.5 0 0 0
+        0 0 1.5 0 0
+        0 0 0 1 0" />
+      <feDisplacementMap id="disp1" in="brightened" in2="map" scale="1" xChannelSelector="R" yChannelSelector="G">
+        <animate attributeName="scale" to="1.2" dur="0.3s" begin="btn1.mouseover" fill="freeze"/>
+        <animate attributeName="scale" to="1" dur="0.3s" begin="btn1.mouseout" fill="freeze"/>
+      </feDisplacementMap>
+    </filter> -->
+
+    <!-- 滤镜13：用于 btn13，加载不同的图片源 feImage1.png -->
+    <!-- <filter id="frosted-13" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+      <feImage href="./feImage1.png" x="0" y="0" width="1" height="1" result="map"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.01" result="blur"/>
+      <feColorMatrix type="matrix" in="blur" result="brightened" values="
+        1.3 0 0 0 0
+        0 1.3 0 0 0
+        0 0 1.3 0 0
+        0 0 0 1 0" />
+      <feDisplacementMap id="disp13" in="brightened" in2="map" scale="0.5" xChannelSelector="R" yChannelSelector="G">
+        <animate attributeName="scale" to="0.6" dur="0.3s" begin="btn13.mouseover" fill="freeze"/>
+        <animate attributeName="scale" to="0.5" dur="0.3s" begin="btn13.mouseout" fill="freeze"/>
+      </feDisplacementMap>
+    </filter> -->
+  </defs>
+</svg>
+
+<script>
+  // 暂时注释掉视频控件逻辑
+  /*
+  const bgVideo = document.getElementById('bgVideo');
+  const toggleBtn = document.getElementById('toggleBtn');
+  
+  toggleBtn.addEventListener('click', () => {
+    if (bgVideo.paused) {
+      bgVideo.play();
+      toggleBtn.textContent = '⏸';
+    } else {
+      bgVideo.pause();
+      toggleBtn.textContent = '▶';
+    }
+  });
+  */
+
+  // 状态栏日期更新
+  (function updateStatusDate() {
+    const el = document.getElementById('statusDate');
+    if (!el) return;
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    el.textContent = month + '月' + day + '日 ' + weekdays[now.getDay()];
+  })();
+
+  // 自动化生成共用滤镜逻辑（用于批量复制标准按钮）
+  const svgDefs = document.querySelector('svg defs');
+  
+  const baseBlur = 0.01; // 基础模糊倍率
+  const baseScale = 1; // 基础折射倍率
+  const baseBrightness = 1.3; // 按钮亮度
+
+  /* 滑动条配置（顺序与控制面板一一对应） */
+  const sliderConfigs = [
+    { title: '按钮模糊',   min: 0,   max: 0.2, step: 0.001, default: baseBlur },
+    { title: '按钮折射',   min: 0,   max: 2.5, step: 0.01,  default: baseScale },
+    { title: '按钮亮度',   min: 0.1, max: 1.9, step: 0.01,  default: baseBrightness },
+    { title: '背景模糊',   min: 0,   max: 30,  step: 0.1,   default: 5 },
+    { title: '背景压暗',   min: 0.1, max: 0.9, step: 0.01,  default: 0.6 }
+  ];
+  const sliderDefaults = sliderConfigs.map(c => c.default); // 保存原始默认值，供重置使用
+  const filterConfigs = [
+    { selector: '.btn0', mapSrc: './assets/feImage0.png', blurMul: 2, scaleMul: 1 },
+    { selector: '.btn13', mapSrc: './assets/feImage1.png', blurMul: 1, scaleMul: 0.5 },
+    { selector: '.btn15', mapSrc: './assets/feImage2.png', blurMul: 1, scaleMul: 0.5 },
+    { selector: '.btn16', mapSrc: './assets/feImage3.png', blurMul: 1, scaleMul: 1 },
+    { selector: '.btn18', mapSrc: './assets/feImage4.png', blurMul: 1, scaleMul: 0.25 },
+    { selector: '.btn19', mapSrc: './assets/feImage5.png', blurMul: 4, scaleMul: 1 }
+  ];
+
+  // 按压状态追踪（用于 pointerup 时判定按钮内/外松开，以及拦截原生 click）
+  let pressedGlass = null;
+  let isPointerProcessed = false;
+
+  /* 创建/刷新所有按钮的 SVG 滤镜（供滑动条实时调用） */
+  function createButtonFilters() {
+    const currentBlur       = sliderConfigs[0].default;
+    const currentScale      = sliderConfigs[1].default;
+    const currentBrightness = sliderConfigs[2].default;
+
+    svgDefs.innerHTML = '';
+    filterConfigs.forEach(conf => {
+      document.querySelectorAll(conf.selector).forEach((btn, index) => {
+        // 确保按钮有唯一 ID (就算你复制时忘了改 ID 也会自动兜底分配)
+        const btnId = btn.id || ('auto-btn-' + conf.selector.replace('.', '') + '-' + index);
+        btn.id = btnId;
+
+        if (conf.mapSrc) {
+          // 在JS中生成专属的 SVG 扭曲动画代码
+          const filterHTML = `
+            <filter id="frosted-${btnId}" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+              <feImage href="${conf.mapSrc}" x="0" y="0" width="1" height="1" result="map"/>
+              <feGaussianBlur in="SourceGraphic" stdDeviation="${currentBlur * conf.blurMul}" result="blur"/>
+              <feColorMatrix type="matrix" in="blur" result="brightened" values="
+                ${currentBrightness} 0 0 0 0
+                0 ${currentBrightness} 0 0 0
+                0 0 ${currentBrightness} 0 0
+                0 0 0 1 0" />
+              <feDisplacementMap in="brightened" in2="map" scale="${currentScale * conf.scaleMul}" xChannelSelector="R" yChannelSelector="G">
+                <!-- <animate attributeName="scale" to="${currentScale * conf.scaleMul * 1.2}" dur="0.3s" begin="${btnId}.mouseover" fill="freeze"/>
+                <animate attributeName="scale" to="${currentScale * conf.scaleMul}" dur="0.3s" begin="${btnId}.mouseout" fill="freeze"/> -->
+              </feDisplacementMap>
+            </filter>
+          `;
+          // 注入到页面底部的 svg defs 中
+          svgDefs.insertAdjacentHTML('beforeend', filterHTML);
+          // 自动给按钮绑上 CSS
+          btn.style.backdropFilter = `url(#frosted-${btnId})`;
+          btn.style.webkitBackdropFilter = `url(#frosted-${btnId})`;
+        }
+      });
+    });
+  }
+  // 延迟到 initControlsPanel 之后再调用，确保控制面板的 glass-thumb 元素已创建
+  // createButtonFilters();
+
+  // 增加背景鼠标拖拽滚动逻辑
+  const scrollBg = document.getElementById('scrollBg');
+  if (scrollBg) {
+    let isDown = false;
+    let startY;
+    let scrollTop;
+
+    scrollBg.addEventListener('mousedown', (e) => {
+      isDown = true;
+      scrollBg.style.cursor = 'grabbing';
+      startY = e.pageY - scrollBg.offsetTop;
+      scrollTop = scrollBg.scrollTop;
+    });
+    scrollBg.addEventListener('mouseleave', () => {
+      isDown = false;
+      scrollBg.style.cursor = 'grab';
+    });
+    scrollBg.addEventListener('mouseup', () => {
+      isDown = false;
+      scrollBg.style.cursor = 'grab';
+    });
+    scrollBg.addEventListener('mousemove', (e) => {
+      if (!isDown) return;
+      e.preventDefault();
+      const y = e.pageY - scrollBg.offsetTop;
+      const walk = (y - startY) * 1.5; // 设置拖动时的滚动倍率
+      scrollBg.scrollTop = scrollTop - walk;
+    });
+  }
+
+  // 按钮特定的图标配置
+  const iconConfigs = {
+    1: { hasOn: true, color: '#3482ff' },
+    2: { hasOn: true, color: '#3482ff' },
+    3: { hasOn: true, color: '#FF503F', onImg: 'fg3_on.png' },
+    4: { hasOn: true, color: '#FF9E05', onImg: 'fg4_on.png' },
+    5: { hasOn: false },
+    6: { hasOn: true, color: '#FF9E05' },
+    7: { hasOn: true, color: '#3482ff' },
+    8: { hasOn: true, color: '#3482ff', onImg: 'fg8_on.png' },
+    9: { hasOn: false },
+    10: { hasOn: false },
+    11: { hasOn: true, color: '#3482ff' },
+    12: { hasOn: false },
+    13: { hasOn: true, isDirectImg: true, imgWidth: '100%', imgHeight: '100%', onImg: 'fg13_on.png' },
+    14: { hasOn: true, isDirectImg: true, imgWidth: '100%', imgHeight: '100%', onImg: 'fg14_on.png' },
+    15: { cycleImages: ['fg15.png', 'fg15_1.png', 'fg15_2.png'], imgWidth: '100%', imgHeight: '100%' },
+    18: { cycleImages: ['fg18.png', 'fg18_1.png'], imgWidth: '100%', imgHeight: '100%' },
+    // 19: { isText: true, text: '编辑' }
+    19: { hasOn: false, isDirectImg: true, imgWidth: '100%', imgHeight: '100%' }
+  };
+
+  // 为普通的按钮和循环切换的按钮注入图标并绑定逻辑
+  const regularBtns = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19];
+  regularBtns.forEach(i => {
+    const btn = document.getElementById('btn' + i);
+    if (!btn) return;
+
+    const config = iconConfigs[i] || { hasOn: false };
+    let innerHTML = '';
+
+    // if (config.isText) {
+    //   // 文本前景模式：直接渲染居中文本
+    //   const text = config.text || '';
+    //   innerHTML = `<span class="btn19-text">${text}</span>`;
+    //   btn.innerHTML = innerHTML;
+    //   return;
+    // }
+
+    if (config.cycleImages) {
+      // 多状态轮播图片逻辑
+      const w = config.imgWidth || '100%';
+      const h = config.imgHeight || '100%';
+      config.cycleImages.forEach((imgSrc, idx) => {
+        innerHTML += `<img class="direct-icon cycle-icon-${idx}" src="images/${imgSrc}" alt="cycle" style="width: ${w}; height: ${h}; opacity: ${idx === 0 ? 1 : 0};">`;
+      });
+      btn.innerHTML = innerHTML;
+
+      let currentIndex = 0;
+      btn.addEventListener('click', () => {
+        btn.querySelector(`.cycle-icon-${currentIndex}`).style.opacity = 0;
+        currentIndex = (currentIndex + 1) % config.cycleImages.length;
+        btn.querySelector(`.cycle-icon-${currentIndex}`).style.opacity = 1;
+      });
+      return; // 跳过后续的普通点按开/关逻辑
+    }
+
+    if (config.isDirectImg) {
+      // 不使用亮度过滤图层，直接渲染带 透明/原生通道的 img，并允许控制大小
+      const w = config.imgWidth || '100%';
+      const h = config.imgHeight || '100%';
+      innerHTML += `<img class="direct-icon icon-off" src="images/fg${i}.png" alt="off" style="width: ${w}; height: ${h};">`;
+      if (config.hasOn) {
+        const onImg = config.onImg || `fg${i}_on.png`;
+        innerHTML += `<img class="direct-icon icon-on" src="images/${onImg}" alt="on" style="width: ${w}; height: ${h};">`;
+      }
+    } else {
+      // 使用 mask-image 实现 alpha 图层着色
+      innerHTML += `<div class="icon-layer icon-off" style="-webkit-mask-image: url('images/fg${i}.png'); mask-image: url('images/fg${i}.png'); background-color: #FFF;"></div>`;
+
+      if (config.hasOn) {
+        const onImg = config.onImg || `fg${i}.png`;
+        innerHTML += `<div class="icon-layer icon-on" style="-webkit-mask-image: url('images/${onImg}'); mask-image: url('images/${onImg}'); background-color: ${config.color};"></div>`;
+      }
+    }
+
+    // 为 btn1 额外添加 restrict 态图标层（黑色 50% 不透明度）
+    if (i === 1 && config.hasOn) {
+      const onImg = config.onImg || `fg${i}.png`;
+      if (!config.isDirectImg) {
+      // if (config.isDirectImg) {
+      //   innerHTML += `<img class="direct-icon icon-restrict" src="images/${onImg}" alt="restrict" style="width: ${config.imgWidth || '100%'}; height: ${config.imgHeight || '100%'};">`;
+      // } else {
+        innerHTML += `<div class="icon-layer icon-restrict" style="-webkit-mask-image: url('images/${onImg}'); mask-image: url('images/${onImg}'); background-color: rgba(0, 0, 0, 0.5);"></div>`;
+      }
+    }
+
+    btn.innerHTML = innerHTML;
+
+    // 默认开启 btn1、btn8、btn13
+    if (i === 8 || i === 13) {
+      btn.classList.add('active-state');
+    }
+
+    // btn1: 三态循环 enable → restrict → disable → enable
+    if (i === 1) {
+      btn.setAttribute('data-state', 'on'); // 默认 enable
+      btn.classList.add('active-state');
+      btn.addEventListener('click', () => {
+        const state = btn.getAttribute('data-state') || 'on';
+        btn.classList.remove('active-state', 'restrict-state');
+        if (state === 'on') {
+          btn.setAttribute('data-state', 'restrict');
+          btn.classList.add('restrict-state');
+        } else if (state === 'restrict') {
+          btn.setAttribute('data-state', 'off');
+        } else {
+          btn.setAttribute('data-state', 'on');
+          btn.classList.add('active-state');
+        }
+      });
+    } else if (config.hasOn) {
+      // 其他按钮：点击切换状态
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('active-state');
+      });
+    }
+  });
+
+  // 状态栏图标与按钮状态联动
+  function syncStatusBar() {
+    const b2  = document.getElementById('btn2');
+    const b3  = document.getElementById('btn3');
+    const b6  = document.getElementById('btn6');
+    const b11 = document.getElementById('btn11');
+    const b13 = document.getElementById('btn13');
+
+    const iconSignal_4G  = document.getElementById('icon_signal_4G');
+    const iconSignal_5G  = document.getElementById('icon_signal_5G');
+    const iconFlightmode = document.getElementById('icon_flightmode');
+    const iconRinger     = document.getElementById('icon_ringer');
+    const iconBattery    = document.getElementById('icon_battery');
+    const iconAp         = document.getElementById('icon_ap');
+    const iconWifi       = document.getElementById('icon_wifi');
+    const textSignal     = document.getElementById('text_signal');
+
+    // btn2: 飞行模式与信号互斥
+    if (b2 && b2.classList.contains('active-state')) {
+      if (iconFlightmode) iconFlightmode.classList.remove('icon-hidden');
+      if (iconSignal_4G)  iconSignal_4G.classList.add('icon-hidden');
+      if (iconSignal_5G)  iconSignal_5G.classList.add('icon-hidden');
+      if (textSignal) textSignal.textContent = '飞行模式';
+    } else {
+      if (iconFlightmode) iconFlightmode.classList.add('icon-hidden');
+      if (iconSignal_4G)  iconSignal_4G.classList.remove('icon-hidden');
+      if (iconSignal_5G)  iconSignal_5G.classList.remove('icon-hidden');
+      if (textSignal) textSignal.textContent = '中国电信HD | 中国移动HD';
+    }
+
+    // btn3: 铃声图标
+    if (b3 && b3.classList.contains('active-state')) {
+      if (iconRinger) iconRinger.classList.remove('icon-hidden');
+    } else {
+      if (iconRinger) iconRinger.classList.add('icon-hidden');
+    }
+
+    // btn6: 电池省电模式切换图片
+    if (b6 && b6.classList.contains('active-state')) {
+      if (iconBattery) iconBattery.src = './images/stat_sys_battery_save.png';
+    } else {
+      if (iconBattery) iconBattery.src = './images/stat_sys_battery.png';
+    }
+
+    // btn11: AP 图标
+    if (b11 && b11.classList.contains('active-state')) {
+      if (iconAp) iconAp.classList.remove('icon-hidden');
+    } else {
+      if (iconAp) iconAp.classList.add('icon-hidden');
+    }
+
+    // btn13: WiFi 图标
+    if (b13 && b13.classList.contains('active-state')) {
+      if (iconWifi) iconWifi.classList.remove('icon-hidden');
+    } else {
+      if (iconWifi) iconWifi.classList.add('icon-hidden');
+    }
+  }
+
+  // 为 btn2/3/6/11/13 追加状态栏同步监听
+  [2, 3, 6, 11, 13].forEach(i => {
+    const btn = document.getElementById('btn' + i);
+    if (btn) btn.addEventListener('click', syncStatusBar);
+  });
+
+  // 初始同步一次
+  syncStatusBar();
+
+  // 为 btn16, btn17 注入滑动条图标并绑定跟手事件
+  [16, 17].forEach(i => {
+    const btn = document.getElementById('btn' + i);
+    if (!btn) return;
+
+    const initialPercent = i === 16 ? 0.75 : 0.35;
+    const initialHeight = initialPercent * 100;
+
+    if (i === 16) {
+      btn.innerHTML = `
+        <div class="slider-fill" style="height: ${initialHeight}%;"></div>
+        <div class="slider-icon-wrapper">
+          <svg class="brightness-svg" viewBox="0 0 102 102" xmlns="http://www.w3.org/2000/svg">
+            <g class="sun-group">
+                <circle class="sun-core" cx="51" cy="51" r="14" />
+                <g class="rays">
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(0, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(45, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(90, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(135, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(180, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(225, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(270, 51, 51)" />
+                    <line class="sun-ray" x1="51" y1="29" x2="51" y2="25" transform="rotate(315, 51, 51)" />
+                </g>
+            </g>
+          </svg>
+        </div>
+      `;
+      btn.style.setProperty('--progress', initialPercent);
+      const newY2 = 25 - 5 * initialPercent;
+      setTimeout(() => {
+        btn.querySelectorAll('.sun-ray').forEach(ray => {
+            ray.setAttribute('y2', newY2);
+        });
+      }, 0);
+    } else if (i === 17) {
+      const initImg = initialPercent === 0 ? 'fg17.png' :
+                      initialPercent <= 0.33 ? 'fg17_1.png' :
+                      initialPercent <= 0.66 ? 'fg17_2.png' : 'fg17_3.png';
+      btn.innerHTML = `
+        <div class="slider-fill" style="height: ${initialHeight}%;"></div>
+        <!-- <div class="slider-icon-wrapper"> -->
+          <div class="icon-layer icon-off vol-icon" style="width: 100%; height: 100%; -webkit-mask-image: url('images/${initImg}'); mask-image: url('images/${initImg}'); background-color: #FFF;"></div>
+          <div class="icon-layer icon-on vol-icon" style="width: 100%; height: 100%; -webkit-mask-image: url('images/${initImg}'); mask-image: url('images/${initImg}'); background-color: #3482ff;"></div>
+        <!-- </div> -->
+      `;
+    }
+    
+    if (initialPercent > 0.15) {
+      btn.classList.add('active-state');
+    }
+
+    const fill = btn.querySelector('.slider-fill');
+    let isDragging = false;
+    let startY = 0;
+    let startPercent = initialPercent; // 记录按下时的初始比例
+    let currentPercent = initialPercent; // 当前比例
+
+    const getClientY = (e) => e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+
+    const startDrag = (e) => {
+      isDragging = true;
+      pressedGlass = null; // 进入拖拽模式，取消按压追踪（避免 pointerup 误触发 click）
+      btn.classList.add('sliding');
+      btn.classList.add('pressing');
+      startY = getClientY(e);
+      startPercent = currentPercent; // 按下瞬间不跳变，记录起点的百分比作为基准
+    };
+
+    const doDrag = (e) => {
+      if (!isDragging) return;
+      if (e.cancelable) e.preventDefault(); // 阻止背景被拖动或原生滚动
+      if (e.stopPropagation) e.stopPropagation();
+      
+      const clientY = getClientY(e);
+      const rect = btn.getBoundingClientRect();
+      const deltaY = clientY - startY; // 计算手指/鼠标移动的像素距离
+      const deltaPercent = -(deltaY / rect.height); // 向上滑动(Y值减小)代表条增加
+      
+      // 在按下时的初始比例基础上增加偏移百分比
+      currentPercent = Math.max(0, Math.min(1, startPercent + deltaPercent));
+      fill.style.height = `${currentPercent * 100}%`;
+      
+      // 给 btn16/btn17 派发对应的属性
+      if (i === 16) {
+        btn.style.setProperty('--progress', currentPercent);
+        const newY2 = 25 - 5 * currentPercent;
+        btn.querySelectorAll('.sun-ray').forEach(ray => {
+            ray.setAttribute('y2', newY2);
+        });
+      } else if (i === 17) {
+        const curImg = currentPercent === 0 ? 'fg17.png' :
+                       currentPercent <= 0.33 ? 'fg17_1.png' :
+                       currentPercent <= 0.66 ? 'fg17_2.png' : 'fg17_3.png';
+        btn.querySelectorAll('.vol-icon').forEach(icon => {
+            icon.style.webkitMaskImage = `url('images/${curImg}')`;
+            icon.style.maskImage = `url('images/${curImg}')`;
+        });
+      }
+
+      // 大于 15% 切换图标状态（我们复用了原本的 .active-state 控制图片透明度/填充色）
+      if (currentPercent > 0.15) {
+        btn.classList.add('active-state');
+      } else {
+        btn.classList.remove('active-state');
+      }
+    };
+
+    const endDrag = () => {
+      if (isDragging) {
+        isDragging = false;
+        btn.classList.remove('sliding');
+        btn.classList.remove('pressing');
+        pressedGlass = null; // 清理按压追踪
+      }
+    };
+
+    // 绑定鼠标事件
+    btn.addEventListener('mousedown', startDrag);
+    document.addEventListener('mousemove', doDrag, { passive: false });
+    document.addEventListener('mouseup', endDrag);
+
+    // 绑定触摸事件
+    btn.addEventListener('touchstart', (e) => {
+      if (e.cancelable) e.preventDefault(); // 阻止手势引起的滚动干扰
+      startDrag(e);
+    }, { passive: false });
+    document.addEventListener('touchmove', doDrag, { passive: false });
+    document.addEventListener('touchend', endDrag);
+  });
+
+
+    /* 单滑块 UI 同步：更新数值、填充条、玻璃手柄位置 */
+    function updateSliderUI(sliderEl) {
+        const glassEl = document.getElementById(sliderEl.dataset.glassId);
+        const displayEl = document.getElementById(sliderEl.dataset.displayId);
+        if (!glassEl || !displayEl) return;
+
+        const val = parseFloat(sliderEl.value);
+        const min = parseFloat(sliderEl.min) || 0;
+        const max = parseFloat(sliderEl.max) || 100;
+        const percent = ((val - min) / (max - min)) * 100;
+
+        // 1. 更新数值文字
+        displayEl.textContent = Number.isInteger(val) ? val : val.toFixed(2);
+
+        // 2. 更新滑块已填充部分的进度条颜色
+        sliderEl.style.backgroundSize = percent + '% 100%';
+
+        // 3. 移动玻璃滑块位置
+        // 注意：需要补偿滑块本身的宽度带来的偏移感
+        // 利用 CSS calc 动态计算中心点偏移，确保 0% 时左侧对齐，100% 时右侧对齐
+        glassEl.style.left = `calc( (var(--glass-size-width) / 2) + ${percent}% - (${percent} / 100) * var(--glass-size-width) )`;
+    }
+
+  /* 初始化控制面板：生成5个滑动条并绑定事件 */
+  function initControlsPanel() {
+    const panel = document.querySelector('.control-panel');
+
+    sliderConfigs.forEach((cfg, idx) => {
+      const sliderId    = 'slider-' + idx;
+      const glassId     = 'glass-'  + idx;
+      const displayId   = 'display-' + idx;
+      const val         = cfg.default;
+      const percent     = ((val - cfg.min) / (cfg.max - cfg.min)) * 100;
+
+      // 动态生成 HTML
+      panel.insertAdjacentHTML('beforeend', `
+        <div class="control-item">
+          <span class="title-display">${cfg.title}</span>
+          <div class="slider-wrapper">
+            <input type="range" id="${sliderId}" class="custom-slider"
+                   data-glass-id="${glassId}" data-display-id="${displayId}" data-cfg-index="${idx}"
+                   min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${val}">
+            <button id="${glassId}" class="glass-thumb btn19"
+                    style="left: calc( (var(--glass-size-width) / 2) + ${percent}% - (${percent} / 100) * var(--glass-size-width) );"></button>
+          </div>
+          <span id="${displayId}" class="value-display">${Number.isInteger(val) ? val : val.toFixed(2)}</span>
+        </div>
+      `);
+
+      // 绑定滑动事件
+      const sliderEl   = document.getElementById(sliderId);
+      const wrapperEl  = sliderEl.closest('.slider-wrapper');
+      const glassEl    = document.getElementById(glassId);
+
+      // 初始状态同步一次 UI（更新 backgroundSize 等）
+      updateSliderUI(sliderEl);
+
+      sliderEl.addEventListener('input', () => {
+        updateSliderUI(sliderEl);
+        handleSliderChange(idx);
+      });
+
+      sliderEl.addEventListener('change', () => {
+        // 动态改变扭曲强度（可选）
+      });
+
+      // 交互动画：按下时玻璃缩放
+      sliderEl.addEventListener('pointerdown', () => {
+        wrapperEl.classList.add('dragging');
+      });
+      document.addEventListener('pointerup', () => {
+        wrapperEl.classList.remove('dragging');
+      });
+      document.addEventListener('pointercancel', () => {
+        wrapperEl.classList.remove('dragging');
+      });
+    });
+
+    const btnRowHTML = `
+      <div class="control-item" style="
+        margin-top: calc(min(100vw, 100vh * 1440 / 3200) * 15 / 1440);
+        gap: calc(min(100vw, 100vh * 1440 / 3200) * 660 / 1440);
+      ">
+        <span class="title-display">背景</span>
+        <span class="title-display">重置</span>
+      </div>
+    `;
+    panel.insertAdjacentHTML('beforeend', btnRowHTML);
+
+  }
+
+  /* 滑动条实时回调：根据索引更新对应参数 */
+  function handleSliderChange(idx) {
+    const val = parseFloat(document.getElementById('slider-' + idx).value);
+    sliderConfigs[idx].default = val;        // 同步当前值
+
+    if (idx === 0 || idx === 1 || idx === 2) {
+      // 按钮参数变化 → 重建滤镜
+      createButtonFilters();
+    } else {
+      // 背景参数变化 → 更新全局遮罩
+      updateGlobalOverlay();
+    }
+  }
+
+  /* 更新全局遮罩的 CSS 变量 */
+  function updateGlobalOverlay() {
+    const overlay = document.querySelector('.global-overlay');
+    overlay.style.setProperty('--bg-blur',      sliderConfigs[3].default);
+    overlay.style.setProperty('--bg-brightness', sliderConfigs[4].default);
+  }
+
+  // 初始化控制面板
+  initControlsPanel();
+  // 控制面板元素已就绪，此时再创建滤镜，确保 glass-thumb 能正确匹配 .btn19 选择器
+  createButtonFilters();
+  updateGlobalOverlay();
+
+  // 预加载音量条图标（避免首次滑动时图标闪烁）
+  (function preloadVolumeIcons() {
+    ['fg17.png', 'fg17_1.png', 'fg17_2.png', 'fg17_3.png'].forEach(name => {
+      const img = new Image();
+      img.src = 'images/' + name;
+    });
+  })();
+
+  // ===== 背景模式管理 =====
+  let bgMode = 'image'; // 'image' | 'video'
+  let customBgImage = null; // 用户自定义图片的 Object URL
+  let customBgVideo = null; // 用户自定义视频的 Object URL
+
+  // 初始状态：图片模式，隐藏视频
+  (function initBgMode() {
+    const video = document.getElementById('bgVideo');
+    video.pause();
+    video.style.opacity = '0';
+    document.getElementById('btn21').textContent = '图片';
+    // 对默认图片进行比例检测
+    const scrollBg = document.getElementById('scrollBg');
+    const img = scrollBg.querySelector('img');
+    applyImageRatio(img, img.src);
+  })();
+
+  // 根据图片宽高比应用显示模式
+  function applyImageRatio(imgElement, src) {
+    const testImg = new Image();
+    testImg.onload = function() {
+      const ratio = this.width / this.height;
+      const targetRatio = 1440 / 3200; // 0.45
+      const scrollBg = document.getElementById('scrollBg');
+
+      if (ratio < targetRatio) {
+        // 长截图：按当前滚动显示逻辑
+        scrollBg.classList.remove('cover-mode');
+        imgElement.style.width = '100%';
+        imgElement.style.height = 'auto';
+        imgElement.style.objectFit = '';
+        scrollBg.style.overflowY = 'auto';
+        scrollBg.style.cursor = 'grab';
+        scrollBg.scrollTop = 0;
+      } else {
+        // 非截图图片：放大裁切显示
+        scrollBg.classList.add('cover-mode');
+        imgElement.style.width = '100%';
+        imgElement.style.height = '100%';
+        imgElement.style.objectFit = 'cover';
+        scrollBg.style.overflowY = 'hidden';
+        scrollBg.style.cursor = 'default';
+      }
+    };
+    testImg.src = src;
+  }
+
+  // 切换到图片模式
+  function switchToImageMode() {
+    bgMode = 'image';
+    const video = document.getElementById('bgVideo');
+    const scrollBg = document.getElementById('scrollBg');
+    video.pause();
+    video.style.opacity = '0';
+    scrollBg.style.opacity = '1';
+    scrollBg.style.pointerEvents = 'auto';
+    document.getElementById('btn21').textContent = '图片';
+    document.getElementById('btn24').classList.add('fade-hidden');
+    document.getElementById('btn25').classList.add('fade-hidden');
+  }
+
+  // 切换到视频模式
+  function switchToVideoMode() {
+    bgMode = 'video';
+    const video = document.getElementById('bgVideo');
+    const scrollBg = document.getElementById('scrollBg');
+    video.play().catch(function(){});
+    video.style.opacity = '1';
+    scrollBg.style.opacity = '0';
+    scrollBg.style.pointerEvents = 'none';
+    document.getElementById('btn21').textContent = '视频';
+    document.getElementById('btn24').classList.remove('fade-hidden');
+    document.getElementById('btn25').classList.remove('fade-hidden');
+  }
+
+  // 设置图片源并应用比例检测
+  function setBgImage(src, isCustom) {
+    if (isCustom) {
+      if (customBgImage) URL.revokeObjectURL(customBgImage);
+      customBgImage = src;
+    }
+    const scrollBg = document.getElementById('scrollBg');
+    const img = scrollBg.querySelector('img');
+    img.src = src;
+    applyImageRatio(img, src);
+  }
+
+  // 设置视频源
+  function setBgVideo(src, isCustom) {
+    if (isCustom) {
+      if (customBgVideo) URL.revokeObjectURL(customBgVideo);
+      customBgVideo = src;
+    }
+    const video = document.getElementById('bgVideo');
+    video.src = src;
+    video.load();
+  }
+
+  // btn21: 切换图片/视频模式
+  document.getElementById('btn21').addEventListener('click', function() {
+    if (bgMode === 'image') {
+      switchToVideoMode();
+    } else {
+      switchToImageMode();
+    }
+  });
+
+  // btn22: 导入本地文件
+  document.getElementById('btn22').addEventListener('click', function() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'images/*,video/*';
+    input.onchange = function(e) {
+      var file = e.target.files[0];
+      if (!file) return;
+
+      var url = URL.createObjectURL(file);
+
+      if (file.type.indexOf('images/') === 0) {
+        setBgImage(url, true);
+        if (bgMode !== 'image') {
+          switchToImageMode();
+        }
+      } else if (file.type.indexOf('video/') === 0) {
+        setBgVideo(url, true);
+        if (bgMode !== 'video') {
+          switchToVideoMode();
+        }
+      }
+    };
+    input.click();
+  });
+
+  const bgVideo = document.getElementById('bgVideo');
+  const pauseBtn = document.getElementById('btn24');
+  const muteBtn = document.getElementById('btn25');
+  
+  pauseBtn.addEventListener('click', () => {
+    if (bgVideo.paused) {
+      bgVideo.play();
+      pauseBtn.textContent = '暂停';
+    } else {
+      bgVideo.pause();
+      pauseBtn.textContent = '播放';
+    }
+  });
+  muteBtn.addEventListener('click', () => {
+    bgVideo.muted = !bgVideo.muted;
+    if (bgVideo.muted) {
+      muteBtn.textContent = '声音';
+    } else {
+      muteBtn.textContent = '静音';
+    }
+  });
+
+  document.getElementById('btn19').addEventListener('click', () => {
+    // 1. 切换控制面板（从隐藏变显示，或显示变隐藏）
+    document.querySelector('.control-panel').classList.toggle('fade-hidden');
+    
+    // 2. 遍历所有 class="btn0" 的元素并切换状态
+    document.querySelectorAll('.btn0').forEach(btn => {
+      btn.classList.toggle('fade-hidden');
+    });
+
+    // 3. 查找 id="btn21" 和 "btn22" 和 "btn23" 的元素并切换状态
+    document.getElementById('btn21').classList.toggle('fade-hidden');
+    document.getElementById('btn22').classList.toggle('fade-hidden');
+    document.getElementById('btn23').classList.toggle('fade-hidden');
+    document.getElementById('btn26').classList.toggle('fade-hidden');
+
+    // 4.
+    if (bgMode === 'video') {
+      document.getElementById('btn24').classList.toggle('fade-hidden');
+      document.getElementById('btn25').classList.toggle('fade-hidden');
+    }
+  });
+
+  // btn23: 重置所有滑动条至默认值（过渡动画）
+  document.getElementById('btn23').addEventListener('click', () => {
+    const D = 400;
+    const t0 = performance.now();
+    const A = sliderConfigs.map((_, i) => parseFloat(document.getElementById('slider-' + i).value));
+    const B = sliderDefaults.slice();
+    (function step(now) {
+      const t = Math.min((now - t0) / D, 1);
+      const e = 1 - Math.pow(1 - t, 3); // ease-out
+      sliderConfigs.forEach((cfg, i) => {
+        const s = document.getElementById('slider-' + i);
+        s.value = cfg.default = A[i] + (B[i] - A[i]) * e;
+        updateSliderUI(s);
+      });
+      createButtonFilters();
+      updateGlobalOverlay();
+      if (t < 1) return requestAnimationFrame(step);
+    })(t0);
+  });
+
+  // btn26: 重置所有滑动条至默认值（过渡动画）+ 背景还原
+  document.getElementById('btn26').addEventListener('click', function() {
+    // --- 背景还原（400ms 渐变） ---
+    var video = document.getElementById('bgVideo');
+    var scrollBg = document.getElementById('scrollBg');
+    var bgImg = scrollBg.querySelector('img');
+
+    // // 情况1：当前已经是默认背景图片（无自定义源，图片模式），无需任何过渡
+    // if (!customBgImage && !customBgVideo && bgMode === 'image') {
+    //   return;
+    // }
+
+    // // 情况2：所有源均为默认 bg.webp / bg.mp4（无任何用户导入）
+    // //   → 直接 switchToImageMode()，不还原图源，利用已在内存中的默认图片无缝切换
+    // if (!customBgImage && !customBgVideo) {
+    //   if (bgMode === 'video') {
+    //     document.getElementById('btn24').classList.add('fade-hidden');
+    //     document.getElementById('btn25').classList.add('fade-hidden');
+    //   }
+    //   switchToImageMode();
+    //   return;
+    // }
+
+    // 情况3：存在用户导入的图片或视频 → 释放自定义 URL 并走淡入淡出切换
+    if (customBgImage) {
+      URL.revokeObjectURL(customBgImage);
+      customBgImage = null;
+    }
+    if (customBgVideo) {
+      URL.revokeObjectURL(customBgVideo);
+      customBgVideo = null;
+    }
+
+    // 淡出
+    video.style.transition = 'opacity 0.2s ease';
+    scrollBg.style.transition = 'opacity 0.2s ease';
+    video.style.opacity = '0';
+    scrollBg.style.opacity = '0';
+
+    setTimeout(function() {
+      // 还原默认源
+      video.src = './bg.mp4';
+      video.load();
+      video.pause();
+      // video.muted = true;
+      pauseBtn.textContent = '暂停';
+      // muteBtn.textContent = '声音';
+      bgImg.src = './bg.webp';
+      applyImageRatio(bgImg, './bg.webp');
+
+      // 切换回图片模式（默认）
+      bgMode = 'image';
+      document.getElementById('btn21').textContent = '图片';
+
+      // 淡入
+      scrollBg.style.opacity = '1';
+      scrollBg.style.pointerEvents = 'auto';
+    }, 200);
+
+    if (bgMode === 'video') {
+      document.getElementById('btn24').classList.add('fade-hidden');
+      document.getElementById('btn25').classList.add('fade-hidden');
+    }
+  });
+
+  // ===== 按钮长按逻辑 =====
+  // 按钮按压态：pointerdown 时添加 .pressing 并记录按压目标
+  // pointerup 时判定松开位置是否在按钮内，决定是否触发 click
+  document.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.glass');
+    if (btn) {
+      btn.classList.add('pressing');
+      pressedGlass = btn;
+    }
+  });
+
+  document.addEventListener('pointerup', (e) => {
+    if (e.pointerId === -1) return;
+    if (!pressedGlass) return;
+
+    pressedGlass.classList.remove('pressing');
+
+    const rect = pressedGlass.getBoundingClientRect();
+    const isInside = (
+      e.clientX >= rect.left &&
+      e.clientX <= rect.right &&
+      e.clientY >= rect.top &&
+      e.clientY <= rect.bottom
+    );
+
+    if (isInside) {
+      // 在按钮内松开：设锁后手动触发 click（锁会拦截后续原生 click 避免重复执行）
+      isPointerProcessed = true;
+      setTimeout(() => { isPointerProcessed = false; }, 100);
+      pressedGlass.click();
+    }
+    // 在按钮外松开：不触发任何事件
+
+    pressedGlass = null;
+  });
+
+  document.addEventListener('pointercancel', () => {
+    if (pressedGlass) {
+      pressedGlass.classList.remove('pressing');
+      pressedGlass = null;
+    }
+  });
+
+  // 拦截由指针事件触发的原生 click（isTrusted），避免与 pointerup 内的 .click() 重复执行
+  // 键盘/无障碍触发的 click（isTrusted 也为 true 但 isPointerProcessed 为 false）则正常放行
+  document.addEventListener('click', (e) => {
+    if (isPointerProcessed && e.isTrusted) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }
+  }, true);
+
+</script>
+</body>
+</html>
